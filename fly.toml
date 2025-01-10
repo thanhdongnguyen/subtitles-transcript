@@ -1,0 +1,37 @@
+app = "subtitles-ai"
+primary_region = "sin"
+
+[build]
+  builder = "paketobuildpacks/builder:full"
+  buildpacks = ["paketo-buildpacks/python"]
+
+[env]
+  PORT = "4001"
+  PYTHON_MODULE = "main:app"
+  PYTHON_ENABLE_UWSGI = "1"
+  UWSGI_INI = "uwsgi.ini"
+
+[processes]
+  web = "uwsgi uwsgi.ini"
+  worker = "celery -A worker.tasks worker --loglevel=info"
+
+
+[http_service]
+    internal_port = 4001
+    force_https = true
+    auto_stop_machines = true
+    min_machines_running = 0
+    auto_start_machines = true
+    max_request_body_size = "150MB"
+    processes = ["web"]
+
+    [http_service.concurrency]
+        type = "connections"
+        hard_limit = 1000
+        soft_limit = 800
+
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 2
+  memory_mb = 2048
