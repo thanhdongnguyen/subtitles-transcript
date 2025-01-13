@@ -68,7 +68,15 @@ error_define = {
     24: {
         "en": "Can't get subtitles of info of link youtube",
         "vi": "Không thể lấy phụ đề của link youtube"
-    }
+    },
+    25: {
+        "en": "Current, not support subtitle with this language",
+        "vi": "Hiện tại, không hỗ trợ phụ đề với ngôn ngữ này"
+    },
+    26: {
+        "en": "Can't not download video",
+        "vi": "Không thể tải video"
+    },
 
 
 }

@@ -1,6 +1,5 @@
 import requests
 from os import environ
-from fireworks.client.audio import AudioInference
 
 class Firework:
 
@@ -13,13 +12,16 @@ class Firework:
                 headers={"Authorization": f"Bearer {environ['FIREWORK_API_KEY']}"},
                 files={"file": f},
                 data={
-                    # "model": "whisper-v3",
-                    "temperature": "0.1",
                     "vad_model": "silero",
-                    "alignment_model": "mms_fa",
-                    "language": language,
+                    "alignment_model": "tdnn_ffn",
+                    "preprocessing": "none",
+                    # "language": "vi",
+                    "temperature": "0",
+                    "timestamp_granularities": "segment",
+                    "audio_window_seconds": "5",
+                    "speculation_window_words": "4",
                     "response_format": "srt",
-                    "timestamp_granularities": "word",
+                    "prompt": "Please transcribe content in this video",
                 },
             )
 

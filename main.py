@@ -2,16 +2,12 @@
 from os import environ, path
 from os.path import join, dirname
 import os, sys
-from urllib.parse import urljoin
-
-import ffmpeg
-import m3u8
-import aiohttp
-import aiofiles
-import ffmpeg
-import asyncio
-import tempfile
+import pysrt
+import yt_dlp
+import subprocess
 import uuid
+import pydub
+
 
 sys.path.append(os.path.abspath(join(dirname(__file__), path.pardir)))
 
@@ -20,7 +16,10 @@ from dotenv import load_dotenv
 from loguru import logger
 from errors.error import get_error
 from flask_cors import CORS
+from langdetect import detect
 from providers.firework import Firework
+from providers.openrouter import OpenRouter
+from providers.openai import OAI
 
 dotenv_path = join(dirname(__file__), '.env')
 load_dotenv(dotenv_path)
@@ -29,6 +28,11 @@ app = Flask(__name__)
 CORS(app)
 
 logger.add("logs/subtitle.log", rotation="1 day", format="{time} {level} {message}", level="INFO")
+
+LANGUAGE = {
+    "en": "english",
+    "vi": "vietnamese",
+}
 
 @app.errorhandler(Exception)
 def error_handler(e):
@@ -50,98 +54,113 @@ async def translate():
         if 'headers' not in form:
             return get_error(19)
 
-        with tempfile.TemporaryDirectory() as temp_dir:
-            try:
-                # Download m3u8
-                ts_file = await download_m3u8(form["url"], temp_dir)
 
-                # Convert sang mp3
-                output_file = os.path.join(temp_dir, f"{uuid.uuid4()}.mp3")
-                await asyncio.to_thread(convert_to_mp3, ts_file, output_file)
+        if form['language'] not in LANGUAGE:
+            return get_error(25)
 
+        op = OAI()
+        openrouter = OpenRouter()
 
-                print(output_file, " - asdasdasd")
-                # Return file
-                # return FileResponse(
-                #     output_file,
-                #     media_type='audio/mpeg',
-                #     filename=os.path.basename(output_file)
-                # )
-            except Exception as e:
-                logger.error(f"Error download: {e}")
-                return get_error(500), 500
-
-        # fw = Firework()
-        # res = fw.speech_to_text("/Users/dongnt/Desktop/truyen_test.mp3", form['language'])
+        filename = f"{uuid.uuid4()}.mp3"
+        output_download = join(dirname(__file__), "upload", filename)
+        download_m3u8_to_mp3(form['url'], form["headers"], output_download)
+        if not os.path.exists(output_download):
+            return get_error(26)
 
 
 
-        return {"success": True}
+        print("Đang chuyển đổi file audio sang text ....")
+        res = op.transcription(output_download)
+
+
+        print("Đang lấy thông tin file subtitle ....")
+
+        # if os.path.exists(output_optimize):
+        #     os.remove(output_optimize)
+
+        return {"success": True, "data": res}
+
+        parse_sub = pysrt.from_string(res)
+        processing_sub = ''
+
+        for s in parse_sub:
+            # lang = detect(s.text)
+
+            s.text = openrouter.complete_translate(s.text, LANGUAGE[form['language']])
+
+            print(f"{s.index}\n")
+
+            # return {"success": True, "data": s.text}
+
+            processing_sub += f"{s.index}\n"
+            processing_sub += f"{s.start} --> {s.end}\n"
+            processing_sub += f"{s.text}\n\n"
+
+        return {"success": True, "data": processing_sub}
     except Exception as e:
         logger.error(f"Error: {e}")
         return get_error(500), 500
 
 
-async def download_segment(session: aiohttp.ClientSession, url: str, output_path: str) -> None:
-    """Download một segment của video"""
-    async with session.get(url) as response:
-        if response.status == 200:
-            async with aiofiles.open(output_path, 'wb') as f:
-                await f.write(await response.read())
+def download_m3u8_to_mp3(m3u8_url, headers, output_filename):
+    """
+    Download file M3U8 và chuyển đổi sang MP3
 
-
-async def download_m3u8(url: str, temp_dir: str) -> str:
-    """Download toàn bộ video từ m3u8 playlist"""
+    Parameters:
+    m3u8_url (str): URL của file M3U8
+    output_filename (str): Tên file MP3 đầu ra (không cần đuôi .mp3)
+    """
     try:
-        # Parse m3u8 playlist
-        playlist = m3u8.load(url)
-        print(f"playlist: {playlist}, url: {url}")
-        if not playlist.segments:
-            raise Exception("Invalid m3u8 playlist")
+        # Cấu hình yt-dlp
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'outtmpl': f'{join(dirname(__file__), "upload")}/%(title)s.%(ext)s',
+            'quiet': False,
+            'no_warnings': False,
+            'concurrent_fragment_downloads': 200
+        }
 
-        # Tạo session để tái sử dụng connection
-        async with aiohttp.ClientSession() as session:
-            # Download tất cả segments song song
-            tasks = []
-            segment_files = []
+        # Download file M3U8
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            print("Đang tải file M3U8...")
+            info = ydl.extract_info(m3u8_url, download=True)
+            downloaded_file = ydl.prepare_filename(info)
 
-            for i, segment in enumerate(playlist.segments):
-                segment_path = os.path.join(temp_dir, f"segment_{i}.ts")
-                segment_files.append(segment_path)
-                tasks.append(download_segment(session, segment.uri, segment_path))
+        # Chuyển đổi sang MP3 sử dụng ffmpeg
+        print("Đang chuyển đổi sang MP3...")
+        convert_audio = pydub.AudioSegment.from_file(downloaded_file, format="mp4")
 
-            await asyncio.gather(*tasks)
 
-        # Ghép các segments lại
-        with open(os.path.join(temp_dir, "concat_list.txt"), "w") as f:
-            for segment_file in segment_files:
-                f.write(f"file '{segment_file}'\n")
+        convert_audio = convert_audio.set_channels(1)  # Chuyển về mono
+        convert_audio = convert_audio.set_frame_rate(16000)  # Sample rate phổ biến cho STT
+        # Chuẩn hóa âm lượng
+        target_dBFS = -20
+        change_in_dBFS = target_dBFS - convert_audio.dBFS
+        convert_audio = convert_audio.apply_gain(change_in_dBFS)
 
-        output_ts = os.path.join(temp_dir, "output.ts")
-        ffmpeg.input(os.path.join(temp_dir, "concat_list.txt"), f="concat", safe=0) \
-            .output(output_ts, c="copy") \
-            .overwrite_output() \
-            .run(capture_stdout=True, capture_stderr=True)
+        convert_audio.export(output_filename, format="mp3")
 
-        return output_ts
+        # ffmpeg_command = [
+        #     'ffmpeg',
+        #     '-i', downloaded_file,
+        #     '-codec:a', 'libmp3lame',
+        #     '-q:a', '2',  # Chất lượng MP3 (0-9, 0 là tốt nhất)
+        #     output_filename
+        # ]
+        #
+        # subprocess.run(ffmpeg_command, check=True)
+
+        # Xóa file tạm sau khi chuyển đổi
+        if os.path.exists(downloaded_file):
+            os.remove(downloaded_file)
+
+        print(f"Hoàn thành! File MP3 được lưu tại: {output_filename}")
 
     except Exception as e:
-        raise Exception(str(e))
+        print(f"Có lỗi xảy ra: {str(e)}")
 
-
-async def convert_to_mp3(input_file: str, output_file: str) -> None:
-    """Convert video sang mp3 với ffmpeg"""
-    try:
-        stream = ffmpeg.input(input_file)
-        stream = ffmpeg.output(stream, output_file,
-                               acodec='libmp3lame',
-                               ab='192k',
-                               ac=2,
-                               ar='44100')
-        ffmpeg.run(stream, capture_stdout=True, capture_stderr=True)
-    except ffmpeg.Error as e:
-        raise Exception(str(e))
 
 
 if __name__ == "__main__":
     app.run(port=4001, debug=True, threaded=False, use_reloader=False)
+
