@@ -19,20 +19,27 @@ class OpenRouter:
         """
 
         completion = self.client.chat.completions.create(
-            model="deepseek/deepseek-chat",
+            model="meta-llama/llama-3.2-3b-instruct:free",
+            # model="anthropic/claude-3.5-sonnet",
             messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a translator subtitle of movie. "
+                        "Your job is to translate text exactly as requested, "
+                        "with no additional commentary or explanation. "
+                        "Always reply with translated text only."
+                        "Format input will: A<|>B, output will A<|>B after translated"
+                    )
+                },
                 {
                     "role": "user",
                     "content": prompt
-                },
-                {
-                    "role": "system",
-                    "content": "Bạn là một chuyên gia dịch thuật phim. Nhiệm vụ của bạn là dịch chính xác và tự nhiên các đoạn hội thoại trong phim từ ngôn ngữ nguồn sang ngôn ngữ đích, đồng thời giữ nguyên ngữ cảnh và cảm xúc của nhân vật. Đảm bảo rằng bản dịch phù hợp với văn hóa và ngôn ngữ của khán giả mục tiêu, sử dụng ngôn ngữ tự nhiên và dễ hiểu. Nếu gặp từ ngữ hoặc cụm từ khó dịch, hãy chọn cách diễn đạt tương đương trong ngôn ngữ đích để truyền tải ý nghĩa một cách chính xác."
                 }
             ],
-            response_format=Translator,
+            # response_format=Translator,
         )
 
-        print(completion.choices[0].message.parsed)
+        print(completion.choices[0].message.content)
 
-        return completion.choices[0].message.parsed
+        return completion.choices[0].message.content

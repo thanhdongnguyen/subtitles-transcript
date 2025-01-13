@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from dataclasses import replace
 from os import environ, path
 from os.path import join, dirname
 import os, sys
@@ -7,7 +8,7 @@ import yt_dlp
 import subprocess
 import uuid
 import pydub
-
+import shutil
 
 sys.path.append(os.path.abspath(join(dirname(__file__), path.pardir)))
 
@@ -67,30 +68,41 @@ async def translate():
         if not os.path.exists(output_download):
             return get_error(26)
 
-
-
         print("Đang chuyển đổi file audio sang text ....")
         res = op.transcription(output_download)
-
-
         print("Đang lấy thông tin file subtitle ....")
-
-        # if os.path.exists(output_optimize):
-        #     os.remove(output_optimize)
-
-        return {"success": True, "data": res}
-
         parse_sub = pysrt.from_string(res)
         processing_sub = ''
 
+        subtitle_texts = [sub.text for sub in parse_sub]
+
+        # 3. Chia nhỏ nội dung (chunk) để tránh vượt giới hạn request
+        chunks = chunk_subtitle_lines(subtitle_texts, max_length=30)
+
+
+        translated_chunks = []
+        for c in chunks:
+            trans = openrouter.complete_translate(c, LANGUAGE[form['language']])
+            print(f"origin: {c} | trans: {trans} \n")
+            translated_chunks.append(trans)
+
+        translated_lines = []
+        for chunk in translated_chunks:
+            for line in chunk.split("<|>"):
+                translated_lines.append(line)
+
+        if len(translated_lines) != len(parse_sub):
+            print("Cảnh báo: Số dòng sau dịch không khớp với số dòng ban đầu.")
+            # Có thể cần tinh chỉnh lại cách chunk và ghép
+            # Ở đây để đơn giản, ta gán min(len(...), len(...)) để tránh lỗi
+            min_len = min(len(translated_lines), len(parse_sub))
+        else:
+            min_len = len(parse_sub)
+
+        for i in range(min_len):
+            parse_sub[i].text = translated_lines[i]
+
         for s in parse_sub:
-            # lang = detect(s.text)
-
-            s.text = openrouter.complete_translate(s.text, LANGUAGE[form['language']])
-
-            print(f"{s.index}\n")
-
-            # return {"success": True, "data": s.text}
 
             processing_sub += f"{s.index}\n"
             processing_sub += f"{s.start} --> {s.end}\n"
@@ -102,6 +114,49 @@ async def translate():
         return get_error(500), 500
 
 
+def chunk_subtitle_lines(subtitle_lines, max_length=20):
+    """
+    Chia nhỏ danh sách subtitle (hoặc chuỗi) thành các chunk
+    có độ dài vừa phải để tránh vượt quá giới hạn token/request của API.
+    max_length tuỳ chỉnh cho phù hợp.
+    """
+    chunks = []
+    current_chunk = ""
+    current_index = 0
+
+    for index, line in enumerate(subtitle_lines):
+        line = line.replace("\n", "")
+        if current_index == max_length:
+
+            current_chunk += line
+            current_index = 0
+            chunks.append(current_chunk)
+            current_chunk = ""
+            continue
+
+        if index == len(subtitle_lines) - 1:
+            chunks.append(current_chunk)
+        else:
+            current_chunk += line + "<|>"
+        current_index += 1
+
+        # if len(current_chunk) + len(line) + 1 > max_length:
+        #     # Nếu thêm line hiện tại vào chunk mà vượt quá max_length
+        #     # thì ta chốt chunk cũ và bắt đầu chunk mới.
+        #     chunks.append(current_chunk)
+        #     current_chunk = line + "<|>"
+        # else:
+        #     if current_chunk:
+        #         current_chunk += line
+        #     else:
+        #         current_chunk = line + "<|>"
+
+    # Đừng quên chunk cuối
+    # if current_chunk:
+    #     chunks.append(current_chunk)
+
+    return chunks
+
 def download_m3u8_to_mp3(m3u8_url, headers, output_filename):
     """
     Download file M3U8 và chuyển đổi sang MP3
@@ -111,20 +166,31 @@ def download_m3u8_to_mp3(m3u8_url, headers, output_filename):
     output_filename (str): Tên file MP3 đầu ra (không cần đuôi .mp3)
     """
     try:
+        id_dir = f"{uuid.uuid4()}"
+        temp_dir = join(dirname(__file__), "upload", id_dir)
+        os.makedirs(temp_dir, exist_ok=True)
         # Cấu hình yt-dlp
         ydl_opts = {
             'format': 'bestaudio/best',
-            'outtmpl': f'{join(dirname(__file__), "upload")}/%(title)s.%(ext)s',
+            'outtmpl': f'{join(dirname(__file__), "upload", id_dir)}/%(title)s.%(ext)s',
             'quiet': False,
             'no_warnings': False,
-            'concurrent_fragment_downloads': 200
+            'concurrent_fragment_downloads': 200,
+            'no_continue': True,
         }
 
         # Download file M3U8
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            print("Đang tải file M3U8...")
-            info = ydl.extract_info(m3u8_url, download=True)
-            downloaded_file = ydl.prepare_filename(info)
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                print("Đang tải file M3U8...")
+                info = ydl.extract_info(m3u8_url, download=True)
+                downloaded_file = ydl.prepare_filename(info)
+        except Exception as e:
+            print(f'Đã xảy ra lỗi khi tải xuống: {e}')
+            # Xóa thư mục tạm khi xảy ra lỗi
+            shutil.rmtree(temp_dir)
+            print(f'Đã xóa thư mục tạm: {temp_dir}')
+            raise Exception(f'Đã xảy ra lỗi khi tải xuống: {e}')
 
         # Chuyển đổi sang MP3 sử dụng ffmpeg
         print("Đang chuyển đổi sang MP3...")
@@ -139,16 +205,6 @@ def download_m3u8_to_mp3(m3u8_url, headers, output_filename):
         convert_audio = convert_audio.apply_gain(change_in_dBFS)
 
         convert_audio.export(output_filename, format="mp3")
-
-        # ffmpeg_command = [
-        #     'ffmpeg',
-        #     '-i', downloaded_file,
-        #     '-codec:a', 'libmp3lame',
-        #     '-q:a', '2',  # Chất lượng MP3 (0-9, 0 là tốt nhất)
-        #     output_filename
-        # ]
-        #
-        # subprocess.run(ffmpeg_command, check=True)
 
         # Xóa file tạm sau khi chuyển đổi
         if os.path.exists(downloaded_file):
