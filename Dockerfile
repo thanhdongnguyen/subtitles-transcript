@@ -1,32 +1,32 @@
-# Sử dụng Python base image
-FROM paketobuildpacks/builder:full as builder
+# Sử dụng base image Python 3.10 với Debian (hoặc Alpine nếu bạn thích)
+FROM python:3.11-slim
 
-# Cài đặt các gói cơ bản
+# Cài đặt các phụ thuộc hệ thống (bao gồm FFmpeg và các công cụ cần thiết cho uWSGI)
 RUN apt-get update && apt-get install -y \
-    ffmpeg
-
-# Cài đặt pip và poetry
-RUN pip install --no-cache-dir poetry
-
-RUN apt install software-properties-common -y
-
-RUN apt install python3.11 -y
+    build-essential \
+    python3-dev \
+    ffmpeg \
+    uwsgi \
+    uwsgi-plugin-python3 \
+    && rm -rf /var/lib/apt/lists/*
 
 # Thiết lập thư mục làm việc
 WORKDIR /app
 
-# Copy tệp cấu hình poetry (pyproject.toml, poetry.lock) trước để sử dụng cơ chế caching
-COPY pyproject.toml poetry.lock* /app/
+# Sao chép các tệp cần thiết
+COPY pyproject.toml poetry.lock ./
 
-# Cài đặt dependencies từ poetry
-RUN poetry config virtualenvs.create false && poetry install --no-interaction --no-ansi
+# Cài đặt Poetry
+RUN pip install poetry
 
-# Copy toàn bộ mã nguồn vào container
-COPY . /app
+# Cài đặt các phụ thuộc Python
+RUN poetry config virtualenvs.create false && poetry install --no-root --no-interaction --no-ansi
 
-# Cấu hình biến môi trường
-ENV PORT=4001
-EXPOSE 4001
+# Sao chép mã nguồn ứng dụng
+COPY . .
 
-# Cấu hình lệnh chạy ứng dụng
-CMD ["uwsgi", "uwsgi.ini"]
+# Thiết lập biến môi trường (nếu cần)
+ENV PYTHONUNBUFFERED=1
+
+# Chạy ứng dụng với uWSGI
+CMD ["uwsgi", "--ini", "uwsgi.ini"]

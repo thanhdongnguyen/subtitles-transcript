@@ -66,8 +66,8 @@ error_define = {
         "vi": "Link youtube không hợp lệ"
     },
     24: {
-        "en": "Can't get subtitles of info of link youtube",
-        "vi": "Không thể lấy phụ đề của link youtube"
+        "en": "Can't get subtitles of info of link",
+        "vi": "Không thể lấy phụ đề của link"
     },
     25: {
         "en": "Current, not support subtitle with this language",
@@ -77,7 +77,14 @@ error_define = {
         "en": "Can't not download video",
         "vi": "Không thể tải video"
     },
-
+    27: {
+        "en": "Number row not match in file",
+        "vi": "Số dòng không khớp trong file"
+    },
+    28: {
+        "en": "Content subtitle in file not valid or incorrect format",
+        "vi": "Nội dung phụ đề trong file không hợp lệ hoặc định dạng không chính xác"
+    },
 
 }
 
