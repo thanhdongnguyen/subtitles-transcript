@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
+import time
 from os import environ, path
 from os.path import join, dirname
 import os, sys
 from typing import List, Annotated
+import uvicorn
 
 import pysrt
 import yt_dlp
@@ -11,6 +13,8 @@ import pydub
 import shutil
 import asyncio
 from cleantext import clean
+import base64
+import json
 
 sys.path.append(os.path.abspath(join(dirname(__file__), path.pardir)))
 
@@ -19,6 +23,7 @@ dotenv_path = join(dirname(__file__), '.env')
 load_dotenv(dotenv_path)
 
 from fastapi import FastAPI, File, UploadFile, Form, Request
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from loguru import logger
@@ -29,7 +34,7 @@ from providers import proxy_translate_chunk, proxy_translate_segment
 app = FastAPI(
     title="Subtitle Translation API",
     description="List API Translate Subtitle",
-    version="1.0.0"
+    version="1.0.0",
 )
 
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
@@ -42,6 +47,26 @@ LANGUAGE = {
     "ar": "Arabic",
     "zh": "Chinese",
     "es": "Spanish",
+    "hr": "Croatian",
+    "nl": "Dutch",
+    "no": "Norwegian",
+    "fr": "French",
+    "de": "German",
+    "el": "Greek",
+    "he": "Hebrew",
+    "it": "Italian",
+    "id": "Indonesian",
+    "ja": "Japanese",
+    "la": "Latin",
+    "pl": "Polish",
+    "pt": "Portuguese",
+    "ro": "Romanian",
+    "ru": "Russian",
+    "sr": "Serbian",
+    "sv": "Swedish",
+    "th": "Thai",
+    "tr": "Turkish",
+    "uk": "Ukrainian",
 }
 
 ALLOWED_EXTENSIONS = {'srt', 'vtt'}
@@ -126,8 +151,11 @@ def health_check():
 #         logger.error(f"Error: {e}")
 #         return get_error(500), 500
 
+
+
+
 @app.post("/v1/translate/file")
-async def translate_file(file: UploadFile, language: Annotated[str, Form()]):
+async def translate_file(file: UploadFile, language: Annotated[str, Form()], stream: Annotated[bool, Form()]):
     try:
         if file.filename == '':
             return get_error(20)
@@ -151,6 +179,12 @@ async def translate_file(file: UploadFile, language: Annotated[str, Form()]):
             os.remove(filepath)
             return get_error(28)
         os.remove(filepath)
+
+        if stream:
+            chunks_srt = [parse_srt[i:i + 50] for i in range(0, len(parse_srt), 50)]
+            return StreamingResponse(processing_stream(chunks_srt, language), media_type="text/event-stream")
+            # return StreamingResponse(sync_generator(), media_type="text/event-stream",
+            #                          headers=headers)
 
         subtitle_texts = [sub.text for sub in parse_srt]
         chunks = chunk_subtitle_lines(subtitle_texts, max_length=49)
@@ -183,6 +217,7 @@ async def translate_chunks(chunks: List[str], language: str) -> List[str]:
         segment = len(split_content_root)
         trans = await proxy_translate_chunk(text=c, origin_lang=origin_lang, target_lang=LANGUAGE[language])
 
+
         split_content_translated = trans.split(CHAR_SPLIT)
         segment_res = len(split_content_translated)
 
@@ -195,6 +230,47 @@ async def translate_chunks(chunks: List[str], language: str) -> List[str]:
             print(f"Re-Translate, index: {index}, origin: {segment}, translated: {len(trans.split(CHAR_SPLIT))} \n")
 
         translated_lines += trans.split(CHAR_SPLIT)
+    return translated_lines
+
+async def processing_stream(chunks_srt, language: str) -> str:
+    for index, chunk in enumerate(chunks_srt):
+        subtitle_texts = [sub.text for sub in chunk]
+
+        translated_lines = await translate_chunks_stream(CHAR_SPLIT.join(subtitle_texts), language)
+
+        processing_sub_stream = ""
+        for i, s in enumerate(chunk):
+            translated_text = translated_lines[i]
+            processing_sub_stream += f"{s.index}\n"
+            processing_sub_stream += f"{s.start} --> {s.end}\n"
+            processing_sub_stream += f"{translated_text}\n\n"
+
+        encode = base64.b64encode(processing_sub_stream.encode("utf-8")).decode("utf-8")
+        stream = {"success": True, "data": encode, "processing": index + 1, "total": len(chunks_srt), "event_type": "open" if index < len(chunks_srt) - 1 else "close"}
+        yield f"data: {json.dumps(stream)}\n\n"
+
+async def translate_chunks_stream(chunks: str, language: str) -> List[str]:
+    translated_lines = []
+
+    code_origin_lang = detect(chunks)
+    origin_lang = "" if code_origin_lang not in LANGUAGE else LANGUAGE[code_origin_lang]
+
+    split_content_root = chunks.split(CHAR_SPLIT)
+    segment = len(split_content_root)
+    trans = await proxy_translate_chunk(text=chunks, origin_lang=origin_lang, target_lang=LANGUAGE[language])
+
+    split_content_translated = trans.split(CHAR_SPLIT)
+    segment_res = len(split_content_translated)
+
+    if segment_res != segment:
+        print(
+            f"data_origin: {chunks}, \n ------------ \n data_translate: {trans} \n translated: {segment_res}, origin: {segment}\n\n\n")
+
+        trans = await handler_segment_translate(split_content_root, LANGUAGE[language])
+
+        print(f"Re-Translate, origin: {segment}, translated: {len(trans.split(CHAR_SPLIT))} \n")
+
+    translated_lines += trans.split(CHAR_SPLIT)
     return translated_lines
 
 async def handler_segment_translate(segments: List[str], lang: str) -> str:
@@ -339,6 +415,7 @@ def download_m3u8_to_mp3(m3u8_url, headers, output_filename):
 
 
 
-# if __name__ == "__main__":
+if __name__ == "__main__":
+    uvicorn.run(app, port=4001, workers=2)
 #     app.r(port=4001, debug=True, threaded=False, use_reloader=False)
 

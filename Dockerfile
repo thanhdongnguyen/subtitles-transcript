@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y \
     python3-dev \
     ffmpeg \
     uwsgi \
+    uvicorn \
     uwsgi-plugin-python3 \
     && rm -rf /var/lib/apt/lists/*
 
@@ -29,4 +30,4 @@ COPY . .
 ENV PYTHONUNBUFFERED=1
 
 # Chạy ứng dụng với uWSGI
-CMD ["uwsgi", "--ini", "uwsgi.ini"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "4001", "--timeout-graceful-shutdown", "120", "--workers", "4"]

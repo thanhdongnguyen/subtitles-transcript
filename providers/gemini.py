@@ -10,11 +10,12 @@ class Gemini:
 
     async def call_provider(self, model: str = "", prompt: str = "", system_prompt: str = "") -> str:
         generation_config = {
-            "temperature": 0.2,
+            "temperature": 0,
             # "top_p": 0.95,
             # "top_k": 40,
             # "max_output_tokens": 20000,
         }
+
         model_init = genai.GenerativeModel(
             model_name=model,
             generation_config=generation_config,
@@ -25,6 +26,6 @@ class Gemini:
             stream=False
 
         )
-        logger.info(f"model: {model}, completion: {response}\n")
+        logger.info(f"model: {model}, completion: {response.usage_metadata.total_token_count}\n")
         return response.text
 

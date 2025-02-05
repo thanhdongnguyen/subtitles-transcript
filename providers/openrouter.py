@@ -17,7 +17,7 @@ class OpenRouter:
                     Note: 
                         - Only return translated text
                     """
-        translated_text = await self.call_provider(prompt=prompt, system_prompt=system, model=model)
+        translated_text, total_token = await self.call_provider(prompt=prompt, system_prompt=system, model=model)
 
         return translated_text
 

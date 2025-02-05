@@ -36,7 +36,7 @@ async def proxy_translate_chunk(text: str, origin_lang: str, target_lang: str) -
                     Note: 
                         - Only return translated text"""
 
-    return await proxy_provider_translate(prompt, system_prompt, model="gemini-1.5-flash", provider="gemini")
+    return await proxy_provider_translate(prompt, system_prompt, model="gemini-1.5-flash-8b", provider="gemini")
 
 async def proxy_translate_segment(text: str, chunk: str, origin_lang: str, target_lang: str) -> str:
     system_prompt = f"""
@@ -49,4 +49,4 @@ async def proxy_translate_segment(text: str, chunk: str, origin_lang: str, targe
     prompt = f"""
            Translate this segment from {origin_lang} to {target_lang}: {text}
            """
-    return await proxy_provider_translate(prompt=prompt, system_prompt=system_prompt, model="gemini-1.5-flash", provider="gemini")
+    return await proxy_provider_translate(prompt=prompt, system_prompt=system_prompt, model="gemini-1.5-flash-8b", provider="gemini")

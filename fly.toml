@@ -1,4 +1,4 @@
-# fly.toml app configuration file generated for subtitles-ai on 2025-01-12T16:17:27+07:00
+# fly.toml app configuration file generated for subtitles-ai on 2025-02-02T22:50:53+07:00
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
@@ -7,16 +7,14 @@ app = 'subtitles-ai'
 primary_region = 'sin'
 
 [build]
-  dockerfile = "Dockerfile"
+  dockerfile = 'Dockerfile'
 
 [env]
   PORT = '4001'
-#  PYTHON_ENABLE_UWSGI = '1'
   PYTHON_MODULE = 'main:app'
-#  UWSGI_INI = 'uwsgi.ini'
 
 [processes]
-  web = 'uwsgi uwsgi.ini'
+  web = 'uvicorn main:app --host 0.0.0.0 --port 4001 --timeout-graceful-shutdown 120 --workers 4'
 
 [http_service]
   internal_port = 4001
@@ -27,11 +25,19 @@ primary_region = 'sin'
   processes = ['web']
 
   [http_service.concurrency]
-    type = 'connections'
-    hard_limit = 1000
-    soft_limit = 800
+    type = 'requests'
+    hard_limit = 10000
+    soft_limit = 8000
+
+  [[http_service.checks]]
+    interval = "10s"
+    grace_period = "30s"
+    timeout = "2s"
+    method = "get"
+    path = "/health"
+    protocol = "http"
 
 [[vm]]
   cpu_kind = 'shared'
-  cpus = 4
-  memory_mb = 4096
+  cpus = 2
+  memory_mb = 2048
